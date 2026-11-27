@@ -67,7 +67,19 @@ function acceptsUnit(id,unit){
  const m=markerMap.get(id);
  return Boolean(m && [m.unit,...m.otherUnits].some(u=>normalUnit(unit)===normalUnit(u)));
 }
+Object.assign(sources,{
+ survey:{name:'ABS · Australian population screening comparator',url:'https://www.abs.gov.au/methodologies/national-health-measures-survey-methodology/2022-24'},
+ hb:{name:'RACGP · Adult female reference interval',url:'https://www.racgp.org.au/getattachment/ec21c057-d128-4236-ba1d-9d44b2370bbd/attachment.aspx'},
+ astRef:{name:'WorkCover WA · Adult reference, appendix 13.1',url:'https://www.workcover.wa.gov.au/wp-content/uploads/2024/06/WorkCover-WA-Guidelines-for-thnt-1st-edition-1-July-2024.pdf'},
+ b12Ref:{name:'RCPA · Total vitamin B12',url:rcpa+'/V/Vitamin-B12'},
+ folateRef:{name:'RCPA · Serum folate',url:rcpa+'/F/Folate'}
+});
 const fallback={
+ ldl:{high:3.5,highExclusive:true,key:'survey'},hdl:{low:1.3,key:'survey',context:'adult female'},
+ triglycerides:{high:2,highExclusive:true,key:'survey'},totalCholesterol:{high:5.5,highExclusive:true,key:'survey'},
+ hba1c:{high:6,highExclusive:true,key:'survey'},haemoglobin:{low:115,high:165,key:'hb'},
+ alt:{high:30,key:'survey',context:'adult female'},ggt:{high:35,key:'survey',context:'adult female'},
+ ast:{high:40,highExclusive:true,key:'astRef'},b12:{low:120,high:1000,key:'b12Ref'},folate:{low:7,high:40,key:'folateRef'},
  mcv:{low:80,high:100,key:'mcv'},crp:{high:5,highExclusive:true,key:'crp'},
  fastingGlucose:{low:3.0,high:5.4,key:'glucose'},sleep:{low:7,high:9,key:'sleep'}
 };
@@ -80,7 +92,7 @@ function assess(r){
  if(!m||v===null||v<0||!acceptsUnit(m.id,r.unit)) return unscored('Check value or unit');
  if(m.id==='sleep' && v>24) return unscored('Check sleep duration','—','',null);
  if(m.kind==='wearable'&&m.id!=='sleep') return unscored('Trend only','Personal trend',m.id==='hrv'?sources.hrv.name:'Wearable data',m.id==='hrv'?'hrv':null,'context');
- if((r.qualifier&&r.qualifier!=='=')||(r.comparator&&r.comparator!=='=')) return unscored('Qualified result');
+ const qualified=(r.qualifier&&r.qualifier!=='=')||(r.comparator&&r.comparator!=='=');
  const hasLow=r.low!=null&&r.low!=='',hasHigh=r.high!=null&&r.high!=='';
  let low=valueOf(r.low),high=valueOf(r.high),le=r.lowExclusive===true,he=r.highExclusive===true;
  let source='Reporting laboratory',sourceKey='lab';
@@ -89,12 +101,14 @@ function assess(r){
   const f=fallback[m.id];
   if(!f){
    const d=decisionThresholds[m.id];
+   if(d&&qualified)return unscored('Qualified result','< '+d.low+' '+r.unit+' flags low',sources[d.key].name,d.key);
    if(d&&v<d.low) return {status:'low',label:'Below threshold',scored:true,range:'< '+d.low+' '+m.unit+' flags low',source:sources[d.key].name,sourceKey:d.key};
-   return unscored('Range needed','See report','Reporting laboratory','lab');
+   return d?unscored('Low threshold met','< '+d.low+' '+r.unit+' flags low',sources[d.key].name,d.key,'context'):unscored('Check reference interval');
   }
-  low=f.low??null;high=f.high??null;le=f.lowExclusive===true;he=f.highExclusive===true;sourceKey=f.key;source=sources[f.key].name;
+  low=f.low??null;high=m.id==='hba1c'&&normalUnit(r.unit)==='mmol/mol'?42:(f.high??null);le=f.lowExclusive===true;he=f.highExclusive===true;sourceKey=f.key;source=sources[f.key].name+(f.context?' · '+f.context:'');
  }
  const range=(low!=null&&high!=null?(le?'> ':'')+low+' – '+(he?'< ':'')+high:low!=null?(le?'> ':'≥ ')+low:(he?'< ':'≤ ')+high)+' '+r.unit;
+ if(qualified)return unscored('Qualified result',range,source,sourceKey);
  const status=low!==null&&(v<low||le&&v===low)?'low':high!==null&&(v>high||he&&v===high)?'high':'in';
  return {status,label:status==='in'?'In range':status==='low'?'Below range':'Above range',scored:true,range,source,sourceKey};
 }
@@ -114,7 +128,7 @@ function categoryResult(id,records){
 }
 const methodology={
  category:'A category score is the percentage of its scorable latest measurements within their displayed ranges. Each marker has equal weight. Missing and trend-only values are excluded. Results may have different collection dates. The score is a descriptive summary and has no validated clinical or performance interpretation.',
- ranges:'Use the interval and unit on the original report first. Selected adult reference intervals from the RCPA and the Australian adult sleep guideline supply labelled fallbacks. Unmatched units or missing intervals stay unscored. A single decision threshold only flags results in the direction it supports. Sleep guidance applies to adults aged 18–64.',
+ ranges:'Use the interval and unit on the original report first. When a report omits its range, Forma uses a cited adult reference interval, population screening comparator or decision threshold. Sex-specific comparisons in this personal workspace use adult female values. Lipid screening limits do not establish individual treatment targets. Unmatched units or missing intervals stay unscored. A single decision threshold only flags results in the direction it supports. Sleep guidance applies to adults aged 18–64.',
  relevance:'3/3 means the latest marker directly matches the action, 2/3 means the link is indirect, and 1/3 means a general habit associated with an in-range marker. Relevance is an app rule about fit to a measurement.',
  evidence:'3/3 means pooled randomised evidence directly supports the stated outcome. 2/3 means practice guidance or indirect intervention evidence. 1/3 means limited evidence or low-certainty guidance. Evidence scores are editorial, distinct from formal GRADE certainty and clinical urgency.'
 };
