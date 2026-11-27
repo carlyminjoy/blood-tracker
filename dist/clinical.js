@@ -110,7 +110,7 @@ function assess(r){
  const range=(low!=null&&high!=null?(le?'> ':'')+low+' – '+(he?'< ':'')+high:low!=null?(le?'> ':'≥ ')+low:(he?'< ':'≤ ')+high)+' '+r.unit;
  if(qualified)return unscored('Qualified result',range,source,sourceKey);
  const status=low!==null&&(v<low||le&&v===low)?'low':high!==null&&(v>high||he&&v===high)?'high':'in';
- return {status,label:status==='in'?'In range':status==='low'?'Below range':'Above range',scored:true,range,source,sourceKey};
+ return {low,high,status,label:status==='in'?'In range':status==='low'?'Below range':'Above range',scored:true,range,source,sourceKey};
 }
 function latestByMarker(records){
  const latest=new Map();

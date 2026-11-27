@@ -46,7 +46,7 @@
       const date=dateISO(r.date||reportDate);
       if(!date||date>today())fail('Enter a valid collection date, today or earlier.');
       const key=id+' '+date+' '+String(r.unit||'');
-      if(seen.has(key))fail('This marker already has an entry for this date. Keep the intended result.');
+      
       seen.add(key);
       const out={marker:id,...reading,date,unit:String(r.unit||'').trim(),...(!known?{markerName:label}:{}),...(r.referenceText?{referenceText:r.referenceText}:{})};
       for(const k of ['low','high'])if(String(r[k]??'').trim()){
