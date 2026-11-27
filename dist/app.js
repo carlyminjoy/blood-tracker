@@ -52,10 +52,101 @@ function cleanImportedProse(workspace){
 }
 if(cleanImportedProse(state.real)){try{persist()}catch{}}
 const readingKey=r=>JSON.stringify([r.date,r.marker,r.unit,r.value,r.qualifier||'',r.low??null,r.high??null,!!r.lowExclusive,!!r.highExclusive,r.referenceText||'']);
-window.formaSaveBlood=(rows,reportName)=>{
+
+// Stable identities for blood markers outside the category catalogue.
+const bloodMarkerAliases=[
+ ['albumin','Albumin',['Alb','Serum albumin']],
+ ['alp','Alkaline phosphatase',['ALP','Alk. Phos.','Alk phos','Alkaline phosph']],
+ ['anionGap','Anion gap',['Anion Gap']],
+ ['calcium','Calcium',['Ca','Total calcium']],
+ ['adjustedCalcium','Adjusted calcium',['Corrected calcium','Albumin adjusted calcium','Calcium adjusted for albumin','Adjusted for Albumin','Calcium corrected']],
+ ['sodium','Sodium',['Na']],
+ ['potassium','Potassium',['K','Potass.']],
+ ['chloride','Chloride',['Cl']],
+ ['bicarbonate','Bicarbonate',['HCO3','Bicarb']],
+ ['creatinine','Creatinine',['Creat','Serum creatinine']],
+ ['urea','Urea',[]],
+ ['egfr','eGFR',['Estimated glomerular filtration rate']],
+ ['totalProtein','Total protein',['T.Prot','Total prot']],
+ ['globulin','Globulin',['Globulins','Glob']],
+ ['bilirubin','Total bilirubin',['T.Bili','Bilirubin','Bilirubin total']],
+ ['directBilirubin','Direct bilirubin',['Conjugated bilirubin']],
+ ['magnesium','Magnesium',['Mg']],
+ ['phosphate','Phosphate',['Phosphorus']],
+ ['rbc','Red blood cell count',['RBC','RCC','Red cell count']],
+ ['wbc','White blood cell count',['WBC','WCC','White cell count']],
+ ['platelets','Platelets',['Platelet count','PLT']],
+ ['haematocrit','Haematocrit',['Hematocrit','HCT','PCV']],
+ ['mch','MCH',['Mean cell haemoglobin','Mean corpuscular haemoglobin']],
+ ['mchc','MCHC',['Mean cell haemoglobin concentration','Mean corpuscular haemoglobin concentration']],
+ ['rdw','RDW',['Red cell distribution width']],
+ ['tsh','TSH',['Thyroid stimulating hormone']],
+ ['freeT4','Free T4',['FT4']],
+ ['freeT3','Free T3',['FT3']],
+ ['amh','AMH',['Anti-Mullerian hormone','Anti Müllerian hormone']],
+ ['iron','Iron',['Serum iron']],
+ ['transferrin','Transferrin',[]]
+];
+const markerNameKey=name=>String(name??'').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]/g,'');
+const bloodAliases=new Map(bloodMarkerAliases.flatMap(([id,name,aliases])=>
+ [id,name,...aliases].map(alias=>[markerNameKey(alias),{id:'lab:'+id,name}])
+));
+function resolveBloodName(label){
+ const known=C.matchMarker(label);
+ return known?{id:known.id,name:known.name}:bloodAliases.get(markerNameKey(label));
+}
+function normaliseBloodRecord(record){
+ const label=String(record.markerName||record.marker||'').replace(/^lab:/,'').trim();
+ const exact=resolveBloodName(label)||resolveBloodName(String(record.marker||'').replace(/^lab:/,''));
+ // Only remove a purely numerical suffix when its prefix is a recognised marker.
+ // Digits inside B12, HbA1c, Free T4 and other meaningful names are retained.
+ const suffix=label.match(/^(.*?)\s+([<>≤≥=+\-\d.\s–—]+)$/);
+ const repaired=!exact&&suffix?resolveBloodName(suffix[1]):null;
+ const match=exact||repaired;
+ const name=match?.name||label.normalize('NFKC').replace(/\s+/g,' ');
+ const marker=match?.id||'lab:'+markerNameKey(name);
+ const changed=marker!==record.marker||name!==record.markerName;
+ return {...record,marker,markerName:name,
+   ...(changed?{originalMarker:record.originalMarker||record.marker,originalMarkerName:record.originalMarkerName||label}:{}),
+   ...(repaired?{markerNeedsReview:true}:{})
+ };
+}
+function normaliseBloodRecords(records){
+ const unique=new Map();
+ for(const record of records){
+   const row=normaliseBloodRecord(record);
+   // Reference metadata and qualifiers are part of reading identity. Conflicts survive.
+   const key=JSON.stringify([row.marker,row.date,row.unit,row.value,row.qualifier||'',row.comparator||'',
+     row.low??null,row.high??null,!!row.lowExclusive,!!row.highExclusive,row.referenceText||'']);
+   const previous=unique.get(key);
+   if(!previous){unique.set(key,row);continue;}
+   previous.sources=[...new Set([...rowSources(previous),...rowSources(row)])];
+   previous.markerNeedsReview=Boolean(previous.markerNeedsReview||row.markerNeedsReview);
+   previous.originalMarkerNames=[...new Set([
+     ...(previous.originalMarkerNames||[]),previous.originalMarkerName||previous.markerName,
+     ...(row.originalMarkerNames||[]),row.originalMarkerName||row.markerName
+   ])];
+ }
+ return [...unique.values()];
+}
+function normaliseWorkspaceBlood(workspace){
+ workspace.blood=normaliseBloodRecords(workspace.blood);
+ workspace.reports=bloodTests(workspace.blood);
+}
+
+const normalisedState=structuredClone(state);
+normaliseWorkspaceBlood(normalisedState.real);
+if(normalisedState.exampleBlood)normalisedState.exampleBlood=normaliseBloodRecords(normalisedState.exampleBlood);
+if(JSON.stringify(normalisedState)!==JSON.stringify(state)){
+ try{persist(normalisedState)}catch{state=normalisedState}
+}
+window.formaSaveBlood=(rows,reportName,options={})=>{
  if(!rows?.length)throw Error('No results to save.');
+ rows=normaliseBloodRecords(rows);
+ if(options.automatic&&rows.some(r=>r.markerNeedsReview))throw Error('A marker name contains possible result or range digits. Review these readings against the report.');
  let added=0;
  saveNew(real=>{
+   normaliseWorkspaceBlood(real);
    const existing=new Map(real.blood.map(r=>[readingKey(r),r]));
    for(const r of rows){
      const key=readingKey(r),previous=existing.get(key);
@@ -261,7 +352,7 @@ function bloodPage(){
  const header=heading('Blood','Explore every recorded blood marker and follow its changes over time.',upload());
  if(!markers.length)return header+'<section class="blank"><h2>Your blood history starts here</h2><p>Upload a pathology report to see your markers and their trends.</p></section>';
  const m=markers.find(m=>m.id===selectedBlood)||markers[0],rows=rs.filter(r=>r.marker===m.id).sort((a,b)=>b.date.localeCompare(a.date)),r=rows[0],a=bloodAssessment(r);
- return header+`<div class="blood-layout"><section class="panel blood-list"><div class="section-head"><h2>Recorded markers</h2>${tag(markers.length)}</div>${markers.map(x=>`<button class="blood-choice ${x===m?'selected':''}" aria-pressed="${x===m}" data-do="selectBlood" data-id="${esc(x.id)}"><span>${esc(x.name)}</span><small>${measured(latest.get(x.id))}</small></button>`).join('')}</section><section class="panel blood-detail"><div class="blood-title"><h2>${esc(m.name)}</h2>${deleteButton('marker',m.id,'Delete marker')}</div><p class="sub">${esc(m.description)}</p><span class="score">${measured(r)}</span> ${status(a)}<p class="date-note">Collected ${fmt(r.date)}</p><div class="note"><strong>Reference</strong> &nbsp;${esc(a.range)}<br>${esc(a.source)}</div><h3>Progress over time</h3>${[...new Set(rows.map(x=>x.unit))].map(u=>bloodChart(rows.filter(x=>x.unit===u),u)).join('')}<div class="table-scroll"><table><thead><tr><th>Collected</th><th>Result</th><th>Reference at test</th><th>Source report</th><th aria-label="Manage reading"></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${fmt(x.date)}</td><td>${measured(x)}</td><td>${esc(bloodAssessment(x).range)}</td><td>${esc(rowSources(x).join(' · '))}</td><td>${deleteButton('reading',readingKey(x),'Delete reading')}</td></tr>`).join('')}</tbody></table></div>${cites([a.sourceKey])}</section></div>`}
+ return header+`<div class="blood-layout"><section class="panel blood-list"><div class="section-head"><h2>Recorded markers</h2>${tag(markers.length)}</div>${markers.map(x=>`<button class="blood-choice ${x===m?'selected':''}" aria-pressed="${x===m}" data-do="selectBlood" data-id="${esc(x.id)}"><span>${esc(x.name)}</span><small>${measured(latest.get(x.id))}</small></button>`).join('')}</section><section class="panel blood-detail"><div class="blood-title"><h2>${esc(m.name)}</h2>${deleteButton('marker',m.id,'Delete marker')}</div><p class="sub">${esc(m.description)}</p><span class="score">${measured(r)}</span> ${status(a)}<p class="date-note">Collected ${fmt(r.date)}</p><div class="note"><strong>Reference</strong> &nbsp;${esc(a.range)}<br>${esc(a.source)}</div><h3>Progress over time</h3>${[...new Set(rows.map(x=>x.unit))].map(u=>bloodChart(rows.filter(x=>x.unit===u),u)).join('')}<div class="table-scroll"><table><thead><tr><th>Collected</th><th>Result</th><th>Reference at test</th><th>Source report</th><th aria-label="Manage reading"></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${fmt(x.date)}</td><td>${measured(x)}${x.markerNeedsReview?'<small>Check original report · marker name repaired</small>':''}</td><td>${esc(bloodAssessment(x).range)}</td><td>${esc(rowSources(x).join(' · '))}</td><td>${deleteButton('reading',readingKey(x),'Delete reading')}</td></tr>`).join('')}</tbody></table></div>${cites([a.sourceKey])}</section></div>`}
 
 
 function render(){route=location.hash.slice(1);if(!Object.hasOwn(tabs,route))route='overview';document.title=`${tabs[route][0]} · Forma`;document.getElementById('nav').innerHTML=Object.entries(tabs).map(([id,[label,ico]])=>`<a href="#${id}" class="${route===id?'active':''}" ${route===id?'aria-current="page"':''}>${icon(ico,16)}${label}</a>`).join('');main.innerHTML=({overview,blood:bloodPage,plan:planPage,sources:sourcePage,age:agePage}[route])()+`<div class="overview-foot"><span>${icon('lock',13)}${inExample()?'Example workspace · Fictional health data':'Personal workspace · Saved on this device'}</span><button data-do="guide">Scoring methodology</button></div>`}
@@ -280,6 +371,6 @@ case'confirmRemove':mutatePlan(p=>{delete p[id]});dialog.close();toast('Action r
 document.addEventListener('input',e=>{if(e.target.id==='search'){query=e.target.value;document.getElementById('filtered').innerHTML=filtered()}});
 document.addEventListener('change',e=>{if(e.target.id==='group'){markerGroup=e.target.value;document.getElementById('filtered').innerHTML=filtered()}});
 document.getElementById('profile').addEventListener('click',workspace);window.addEventListener('hashchange',()=>{if(dialog.open)dialog.close();render();window.scrollTo(0,0)});
-window.addEventListener('storage',e=>{if(e.key===key&&e.newValue){try{const update=JSON.parse(e.newValue);if(update.real&&update.examplePlan){state=update;if(dialog.open)dialog.close();render()}}catch{}}});
+window.addEventListener('storage',e=>{if(e.key===key&&e.newValue){try{const update=JSON.parse(e.newValue);if(update.real&&update.examplePlan){normaliseWorkspaceBlood(update.real);state=update;if(dialog.open)dialog.close();render()}}catch{}}});
 render();
 })();
