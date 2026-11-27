@@ -1,0 +1,11 @@
+#fw-dialog{box-sizing:border-box;width:min(560px,calc(100vw - 30px));max-height:88vh;overflow:auto;margin:auto;border:1px solid #d5e2da;border-radius:22px;padding:26px;background:#fff;color:#173e38;box-shadow:0 20px 90px #173d363a;text-align:left}
+#fw-dialog::backdrop{background:#183c3590;backdrop-filter:blur(3px)}
+#fw-dialog header,#fw-dialog footer{display:flex;align-items:center;justify-content:space-between;gap:14px;background:transparent;color:inherit;padding:0;position:static}
+#fw-dialog h2{font:600 28px/1.15 inherit;letter-spacing:-.04em;margin:4px 0;color:inherit}
+#fw-dialog small{font-size:13px;color:#43695d}#fw-dialog button{cursor:pointer}#fw-dialog .fw-close{width:36px;height:36px;border:0;border-radius:50%;background:#eff5ee;color:#254d43;font-size:23px}
+#fw-dialog p{font-size:15px;line-height:1.5;color:#456257;margin:15px 0}
+#fw-dialog .fw-drop{padding:24px 12px;position:relative;display:grid;gap:6px;justify-items:center;background:#f1f7f1;border:1.5px dashed #90b8a7;border-radius:15px;text-align:center}
+#fw-dialog .fw-drop input{position:absolute;width:100%;height:100%;inset:0;opacity:0;cursor:pointer}#fw-dialog .fw-drop:focus-within{outline:2px solid #3f7b61}#fw-dialog .fw-drop span{font-size:14px}
+#fw-dialog details{margin:18px 0;font-size:14px}#fw-dialog summary{cursor:pointer;font-weight:650}#fw-dialog a,#fw-dialog .fw-template{color:#246950;text-decoration:underline}#fw-dialog .fw-template{background:none;border:0;font:inherit;padding:0}
+#fw-dialog .fw-preview{overflow-x:auto}#fw-dialog table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}#fw-dialog caption{text-align:left;color:#507061}#fw-dialog th,#fw-dialog td{padding:8px 4px;text-align:right;border-bottom:1px solid #dee7dc}
+#fw-dialog footer{padding-top:16px;margin-top:16px;border-top:1px solid #dce7da}#fw-dialog footer span{font-size:13px}#fw-dialog .fw-save{background:#214c3e;color:white;border:0;padding:10px 15px;border-radius:10px;font-weight:650}#fw-dialog .fw-save:disabled{opacity:.45}
