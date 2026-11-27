@@ -32,9 +32,9 @@ const plan=()=>inExample()?state.examplePlan:state.real.plan;
 const persist=(next=state)=>{localStorage.setItem(key,JSON.stringify(next));state=next};
 function records(){return [...book().blood,...book().wear.flatMap(row=>Object.entries({sleep:'sleepHours',hrv:'hrv',steps:'steps',restingHR:'restingHR'}).filter(([,field])=>row[field]!=null).map(([marker,field])=>({marker,value:row[field],unit:C.matchMarker(marker).unit,date:row.date,report:row.source||'Example wearable export'})))]}
 function saveNew(change){const next=structuredClone(state);change(next.real);next.mode='personal';persist(next);render()}
-window.formaSaveBlood=(rows,reportName)=>{
+window.formaSaveBlood=(rows,reportName,options={})=>{
  if(!Array.isArray(rows)||!rows.length)throw Error('No reviewed results to save.');
- saveNew(real=>{for(const r of rows){const row={...r,report:reportName};let prev=real.blood.findIndex(x=>x.marker===r.marker&&x.date===r.date&&x.unit===r.unit);if(prev>=0)real.blood[prev]=row;else real.blood.push(row)}
+ saveNew(real=>{for(const r of rows){const row={...r,report:reportName};let prev=real.blood.findIndex(x=>x.marker===r.marker&&x.date===r.date&&x.unit===r.unit);if(prev>=0 && options.automatic){const old=real.blood[prev];if(['value','qualifier','low','high','lowExclusive','highExclusive','referenceText'].some(k=>(old[k]??'')!==(row[k]??'')))throw Error('A saved reading or reference differs for '+(row.markerName||C.matchMarker(row.marker)?.name||row.marker)+'. Review before replacing it.');}if(prev>=0)real.blood[prev]=row;else real.blood.push(row)}
  real.reports.unshift({name:reportName,date:day(),count:rows.length})});toast(`${rows.length} blood results saved to your workspace`);
 };
 window.formaPersonalActive=()=>!inExample();
