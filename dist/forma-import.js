@@ -92,7 +92,13 @@
     const aliases=markers().flatMap(m=>[m.name,m.id,...m.aliases].map(a=>({a,m}))).sort((x,y)=>y.a.length-x.a.length);
     const rows=[],seen=new Set();
     for(const rawLine of raw.split(/[\r\n]+/)){
-      const line=rawLine.trim().replace(/\|/g,' ').replace(/\s+/g,' ').replace(/\(([HL])\)/gi,' $1 ');
+      let line=rawLine.trim().replace(/\|/g,' ').replace(/\s+/g,' ').replace(/\(([HL])\)/gi,' $1 ');
+      line=line.replace(/^Blood HbA1c\s+(\d+(?:\.\d+)?)\s*%\s+\d{2}\/\d{2}\/\d{4}.*$/i,'HbA1c $1 %')
+        .replace(/^HbA1c Fraction\s+(?=\d)/i,'HbA1c ').replace(/^Vitamin D3\s+/i,'Vitamin D ')
+        .replace(/^Glucose\s+(\d+(?:\.\d+)?)\s+mmol\/L\s+fasting\b/i,'Fasting glucose $1 mmol/L')
+        .replace(/^LDL\s*\(calculated\)\s*\*?\s*/i,'LDL ')
+        .replace(/\((\s*(?:[<>]=?\s*)?\d[\d.\s–-]*)\)\s+[=|~]+$/,'($1)');
+      if(/high\s+risk/i.test(raw)&&/^(?:Total Cholesterol|HDL|LDL|Triglycerides)\b/i.test(line))line=line.replace(/\s*\((?:below|above)\b.*$/i,'');
       const hit=aliases.find(({a})=>line.toLowerCase().startsWith(a.toLowerCase())&&/^[\s:=<>≤≥]/.test(line.slice(a.length)));
       if(!hit)continue;
       const val=line.slice(hit.a.length).match(/^[ :]*((?:<=|>=|<|>|≤|≥|=)?\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)\s*(?:[HL]\b\s*)?(.+)$/i);
@@ -166,9 +172,28 @@
           const doc=await lib.getDocument({data:await file.arrayBuffer(),isEvalSupported:false,useSystemFonts:true}).promise;
           if(!d.isConnected){await doc.destroy();return;}pdf=doc;
           original('<div class="fi-pages"></div><div class="fi-tools"><button data-prev>Previous</button><span class="fi-page-no"></span><button data-next>Next</button><button data-ocr>Read page with OCR</button></div>');
-          await renderPage(1);const pages=[];
-          for(let i=1;i<=Math.min(30,doc.numPages)&&d.isConnected;i++){const page=await doc.getPage(i);pages.push(pdfLines((await page.getTextContent()).items));}
-          if(d.isConnected){draft(parseText(pages.join('\n')));if(doc.numPages>30)reportIssues(['Text extraction covered the first 30 pages. Review remaining pages individually.']);}
+          const found=[],seen=new Set(),textDates=new Set(),notes=[];
+          let worker;
+          try{
+            for(let n=1;n<=Math.min(doc.numPages,30)&&d.isConnected;n++){
+              const page=await doc.getPage(n);let text=pdfLines((await page.getTextContent()).items);
+              const scanned=text.trim().length<40;
+              if(scanned){
+                status('Reading scanned page '+n+' of '+doc.numPages+' on this device…');
+                try{
+                  if(!worker){const {default:t}=await import(asset('tesseract.esm.min.js'));worker=await t.createWorker('eng',1,{workerPath:asset('worker.min.js'),corePath:asset('tesseract-core-lstm.js'),langPath:asset('').replace(/\/$/,''),workerBlobURL:false,cacheMethod:'none'});ocrWorker=worker;}
+                  const v=page.getViewport({scale:1}),vp=page.getViewport({scale:2050/Math.max(v.width,v.height)}),canvas=document.createElement('canvas');canvas.width=Math.ceil(vp.width);canvas.height=Math.ceil(vp.height);
+                  await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+                  text=(await worker.recognize(canvas)).data.text;
+                }catch{notes.push('Page '+n+' needs manual review.');continue;}
+              }
+              const md=text.match(/\bCollected(?:\s+Date)?\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})\b/i);
+              const date=md?dateISO(md[1].replace(/\/(\d{2})$/,'/20$1')):'';
+              for(const row of parseText(text)){row.date=date;const mk=row.marker+'|'+date;if(scanned&&(textDates.has(mk)||(row.marker==='hba1c'&&row.unit==='%'&&Number(row.value)>25)))continue;if(!scanned)textDates.add(mk);const key=JSON.stringify([row.marker,row.unit,row.value,row.date]);if(!seen.has(key)){seen.add(key);found.push(row);}}
+            }
+          }finally{if(worker){await worker.terminate().catch(()=>{});ocrWorker=null;}}
+          if(d.isConnected){draft(found);await renderPage(1);notes.push('Check scanned digits against the original. Only supported, recognised readings appear. High-risk-only lipid targets are excluded.');if(doc.numPages>30)notes.push('Review pages after page 30 manually.');reportIssues(notes);}
+
         } else {sourceUrl=URL.createObjectURL(file);original('<div class="fi-pages"><img alt="Original uploaded report"></div><div class="fi-tools"><button data-ocr>Read image with OCR</button></div>');q('.fi-pages img').src=sourceUrl;draft([]);}
       } catch(e){if(d.isConnected){draft([]);status(ext==='csv'?e.message:'Unable to read this PDF. Open the original on your device and enter the readings below.');}}
       finally{busy=false;}
