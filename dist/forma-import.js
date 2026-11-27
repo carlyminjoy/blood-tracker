@@ -36,16 +36,19 @@
     const seen=new Set();
     return rows.map((r,i)=>{
       const fail=s=>{throw Error('Result '+(i+1)+' · '+s);};
-      if(!markers().some(m=>m.id===r.marker))fail('Choose a supported marker.');
-      const reading=parseValue(r.value);
+      const label=String(r.marker||'').trim(),known=lookup(label);
+      if(!label)fail('Enter a marker name.');
+      const id=known?known.id:'lab:'+label.normalize('NFKC').toLowerCase().replace(/\s+/g,' ');
+      const raw=String(r.value??'').trim();
+      const reading=parseValue(raw)||(!known && raw ? {value:/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(raw)?Number(raw):raw}:null);
       if(!reading)fail('Enter a non-negative numerical result, including any comparison (such as <1).');
-      if(!String(r.unit||'').trim())fail('Enter the reported unit.');
+      if(known&&!String(r.unit||'').trim())fail('Enter the reported unit.');
       const date=dateISO(r.date||reportDate);
       if(!date||date>today())fail('Enter a valid collection date, today or earlier.');
-      const key=r.marker+' '+date;
+      const key=id+' '+date+' '+String(r.unit||'');
       if(seen.has(key))fail('This marker already has an entry for this date. Keep the intended result.');
       seen.add(key);
-      const out={marker:r.marker,...reading,date,unit:r.unit.trim()};
+      const out={marker:id,...reading,date,unit:String(r.unit||'').trim(),...(!known?{markerName:label}:{}),...(r.referenceText?{referenceText:r.referenceText}:{})};
       for(const k of ['low','high'])if(String(r[k]??'').trim()){
         const n=parseValue(r[k]);if(!n||n.qualifier)fail('Enter non-negative numerical reference limits.');
         out[k]=n.value;if(r[k+'Exclusive'])out[k+'Exclusive']=true;
@@ -72,17 +75,17 @@
   function parseCsv(raw){
     const [header,...lines]=splitCSV(raw);
     if(!header)throw Error('The CSV is empty.');
-    if(lines.length>200)throw Error('Split the file into imports of up to 200 results.');
+
     const cols=header.map(norm), select=(...a)=>cols.findIndex(c=>a.includes(c));
     const ix={marker:select('marker','biomarker','test','testname','analyte','name'),value:select('value','result'),unit:select('unit','units'),date:select('date','collectiondate','sampledate','collected'),low:select('low','lower','reflow','referencelow','lowerlimit'),high:select('high','upper','refhigh','referencehigh','upperlimit'),range:select('range','interval','referencerange','referenceinterval'),qualifier:select('qualifier','comparator')};
-    if([ix.marker,ix.value,ix.unit].includes(-1))throw Error('Include marker, value and unit column headers.');
+    if([ix.marker,ix.value].includes(-1))throw Error('Include marker and value column headers.');
     const rows=[],issues=[];
     lines.forEach((cells,i)=>{
       const get=k=>cells[ix[k]]||'',m=lookup(get('marker'));
-      if(!m){issues.push('Row '+(i+2)+' · Unsupported marker '+(get('marker')||'(blank)'));return;}
-      const r={...blank(),marker:m.id,value:(get('qualifier')+' '+get('value')).trim(),unit:get('unit'),date:dateISO(get('date'))};
+      
+      const r={...blank(),marker:m?.id||get('marker'),value:(get('qualifier')+' '+get('value')).trim(),unit:get('unit'),date:dateISO(get('date'))};
       if(get('date')&&!r.date)issues.push('Row '+(i+2)+' · Confirm the collection date.');
-      if(get('range')){const b=parseRange(get('range'));if(b)Object.assign(r,b);else issues.push('Row '+(i+2)+' · Copy the reference interval manually.');}
+      if(get('range')){const b=parseRange(get('range'));if(b)Object.assign(r,b);else r.referenceText=get('range');}
       for(const k of ['low','high'])if(get(k)){const b=parseRange(get(k));if(b&&b[k]!==undefined)Object.assign(r,b);else r[k]=get(k);}
       rows.push(r);
     });
@@ -100,7 +103,15 @@
         .replace(/\((\s*(?:[<>]=?\s*)?\d[\d.\s–-]*)\)\s+[=|~]+$/,'($1)');
       if(/high\s+risk/i.test(raw)&&/^(?:Total Cholesterol|HDL|LDL|Triglycerides)\b/i.test(line))line=line.replace(/\s*\((?:below|above)\b.*$/i,'');
       const hit=aliases.find(({a})=>line.toLowerCase().startsWith(a.toLowerCase())&&/^[\s:=<>≤≥]/.test(line.slice(a.length)));
-      if(!hit)continue;
+      if(!hit){
+        if(/^(?:date|time|lab no|collected|reported|page|age|phone|fax|in SI units|target|printed|requested|dob)\b/i.test(line))continue;
+        const g=line.match(/^([\p{L}][\p{L}\p{N} ()/.*%_-]{0,85}?)\s+([<>≤≥]?\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)|negative|positive|reactive|non-reactive|detected|not detected)\s*([^\s(]*)\s*(?:fasting\s*)?(?:\(([^)]+)\))?\s*[=|]*$/iu);
+        if(!g||(!g[3]&&!g[4]&&!/[a-z]/i.test(g[2])))continue;
+        if(g[3]&&!/[a-zµμ%£]/i.test(g[3]))continue;
+        const name=g[1].trim().replace(/\*+$/,'').trim();
+        const row={...blank(),marker:lookup(name)?.id||name,value:g[2].trim(),unit:g[3],referenceText:g[4]||'',...(parseRange(g[4])||{})};
+        const fingerprint=JSON.stringify(row);if(!seen.has(fingerprint)){seen.add(fingerprint);rows.push(row);}continue;
+      }
       const val=line.slice(hit.a.length).match(/^[ :]*((?:<=|>=|<|>|≤|≥|=)?\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?)\s*(?:[HL]\b\s*)?(.+)$/i);
       if(!val||!parseValue(val[1]))continue;
       const rest=val[2].trim();
@@ -112,7 +123,7 @@
       if(bounds===null)continue;
       const r={...blank(),marker:hit.m.id,value:val[1].trim(),unit,...bounds};
       const key=JSON.stringify(r);if(!seen.has(key)){rows.push(r);seen.add(key);}
-      if(rows.length>=200)break;
+      
     }
     return rows;
   }
@@ -124,8 +135,8 @@
     const d=document.createElement('dialog');d.className='fi-import';d.setAttribute('aria-labelledby','fi-title');
     d.innerHTML=`<div class="fi-head"><div><h2 id="fi-title">Upload blood results</h2><p>Check each reading against the original report.</p></div><button data-close aria-label="Close">×</button></div>
     <div class="fi-scroll"><section class="fi-start"><label class="fi-drop"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 16V4m-5 5 5-5 5 5M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg><strong>Choose a report or drop it here</strong><span>PDF, JPG, PNG, WebP or CSV · up to 20 MB</span><input type="file" aria-label="Choose a blood report" accept=".pdf,.csv,.png,.jpg,.jpeg,.webp"></label><button class="fi-manual" data-manual>Enter results manually</button>
-    <details><summary>${markers().length} supported blood markers</summary><p>${markers().map(m=>escape(m.name)).join(', ')}.</p></details><details><summary>CSV format and template</summary><p>Include marker, value and unit. Add date (YYYY-MM-DD or DD/MM/YYYY), low and high when available. Include comparisons in the value, such as &lt;1.</p><a download="blood-results-template.csv" href="data:text/csv;charset=utf-8,marker%2Cvalue%2Cunit%2Cdate%2Clow%2Chigh%0A">Download blank CSV template</a></details></section>
-    <section class="fi-review" hidden><div class="fi-file"></div><p class="fi-status" role="status"></p><div class="fi-layout"><div class="fi-original" hidden></div><div class="fi-editor"><details class="fi-issues" hidden></details><h3>Report details</h3><div class="fi-pair"><label>Report name<input class="fi-name" maxlength="140" placeholder="Blood test"></label><label>Collection date<input class="fi-date" type="date" max="${today()}"></label></div><div class="fi-results-head"><h3>Results to import</h3><button data-add>+ Add marker</button></div><p>Copy the units, comparisons and reference limits as printed. Leave unavailable limits blank. Qualified results such as &lt;1 appear in history and are excluded from scores.</p><div class="fi-rows"></div><label class="fi-check"><input type="checkbox"> I checked these values, units, dates and limits against the report.</label></div></div></section></div>
+    <details><summary>${markers().length} markers used for category scores</summary><p>${markers().map(m=>escape(m.name)).join(', ')}.</p></details><details><summary>CSV format and template</summary><p>Include marker, value and unit. Add date (YYYY-MM-DD or DD/MM/YYYY), low and high when available. Include comparisons in the value, such as &lt;1.</p><a download="blood-results-template.csv" href="data:text/csv;charset=utf-8,marker%2Cvalue%2Cunit%2Cdate%2Clow%2Chigh%0A">Download blank CSV template</a></details></section>
+    <section class="fi-review" hidden><div class="fi-file"></div><p class="fi-status" role="status"></p><div class="fi-layout"><div class="fi-original" hidden></div><div class="fi-editor"><details class="fi-issues" hidden></details><h3>Report details</h3><div class="fi-pair"><label>Report name<input class="fi-name" maxlength="140" placeholder="Blood test"></label><label>Collection date<input class="fi-date" type="date" max="${today()}"></label></div><div class="fi-results-head"><h3>Results to import</h3><button data-add>+ Add marker</button></div><p>Copy the units, comparisons and reference limits as printed. Leave unavailable limits blank. Qualified results such as &lt;1 appear in history and are excluded from scores.</p><datalist id="fi-marker-options">${markers().map(m=>'<option value="'+escape(m.name)+'"></option>').join('')}</datalist><div class="fi-rows"></div><label class="fi-check"><input type="checkbox"> I checked these values, units, dates and limits against the report.</label></div></div></section></div>
     <div class="fi-footer"><p role="alert"></p><button data-close>Cancel</button><button class="fi-save" data-save hidden>Save results</button></div>`;
     document.body.append(d); const q=s=>d.querySelector(s);
     let rows=[],busy=false,saving=false,sourceUrl='',pdf=null,pageNo=1,pageEpoch=0,ocrWorker=null;
@@ -133,13 +144,13 @@
     const showReview=()=>{q('.fi-start').hidden=true;q('.fi-review').hidden=false;q('[data-save]').hidden=false;};
     function render(){
       q('.fi-rows').innerHTML=rows.map((r,i)=>`<fieldset data-i="${i}"><legend>Result ${i+1}</legend><button class="fi-remove" data-remove="${i}" aria-label="Remove result ${i+1}">Remove</button><div class="fi-grid">
-        <label class="fi-wide">Marker<select data-k="marker"><option value="">Choose a marker</option>${markers().map(m=>`<option value="${escape(m.id)}" ${r.marker===m.id?'selected':''}>${escape(m.name)}</option>`).join('')}</select></label>
-        <label>Value<input data-k="value" maxlength="28" value="${escape(r.value)}"></label><label>Unit<input data-k="unit" maxlength="32" value="${escape(r.unit)}"></label>
+        <label class="fi-wide">Marker<input list="fi-marker-options" data-k="marker" value="${escape(lookup(r.marker)?.name||r.marker)}" placeholder="Type any marker name"></label>
+        <label>Value<input data-k="value" value="${escape(r.value)}"></label><label>Unit<input data-k="unit" maxlength="32" value="${escape(r.unit)}"></label>
         ${['low','high'].map(k=>`<label>${k==='low'?'Lower':'Upper'} limit<span class="fi-bound"><select aria-label="Comparison for ${k} limit" data-k="${k}Exclusive"><option value="">${k==='low'?'≥':'≤'}</option><option value="1" ${r[k+'Exclusive']?'selected':''}>${k==='low'?'&gt;':'&lt;'}</option></select><input data-k="${k}" inputmode="decimal" maxlength="28" value="${escape(r[k])}"></span></label>`).join('')}
-        <label class="fi-wide">Result date (if different)<input type="date" data-k="date" max="${today()}" value="${escape(r.date)}"></label></div></fieldset>`).join('');
+        <label class="fi-wide">Reference text (optional)<input data-k="referenceText" value="${escape(r.referenceText||'')}"></label><label class="fi-wide">Result date (if different)<input type="date" data-k="date" max="${today()}" value="${escape(r.date)}"></label></div></fieldset>`).join('');
       q('.fi-check input').checked=false;
     }
-    function draft(found){rows=found.length?found:[blank()];render();status(found.length?found.length+' suggested result'+(found.length===1?'':'s')+'. Review each reading and add any missing supported markers.':'Enter the results you can verify against the original.');}
+    function draft(found){rows=found.length?found:[blank()];render();status(found.length?found.length+' suggested result'+(found.length===1?'':'s')+'. Review each reading and add any missing markers.':'Enter the results you can verify against the original.');}
     function reportIssues(issues){const box=q('.fi-issues');box.hidden=!issues.length;box.innerHTML='<summary>Review '+issues.length+' import notes</summary><ul>'+issues.map(s=>'<li>'+escape(s)+'</li>').join('')+'</ul>';}
     function original(html){d.classList.add('fi-with-source');q('.fi-original').hidden=false;q('.fi-original').innerHTML='<details open><summary>Original report</summary>'+html+'</details>';}
     async function renderPage(p){
@@ -192,7 +203,7 @@
               for(const row of parseText(text)){row.date=date;const mk=row.marker+'|'+date;if(scanned&&(textDates.has(mk)||(row.marker==='hba1c'&&row.unit==='%'&&Number(row.value)>25)))continue;if(!scanned)textDates.add(mk);const key=JSON.stringify([row.marker,row.unit,row.value,row.date]);if(!seen.has(key)){seen.add(key);found.push(row);}}
             }
           }finally{if(worker){await worker.terminate().catch(()=>{});ocrWorker=null;}}
-          if(d.isConnected){draft(found);await renderPage(1);notes.push('Check scanned digits against the original. Only supported, recognised readings appear. High-risk-only lipid targets are excluded.');if(doc.numPages>30)notes.push('Review pages after page 30 manually.');reportIssues(notes);}
+          if(d.isConnected){draft(found);await renderPage(1);notes.push('Check scanned digits against the original. Check for missed rows and add any marker by name. High-risk-only lipid targets are excluded.');if(doc.numPages>30)notes.push('Review pages after page 30 manually.');reportIssues(notes);}
 
         } else {sourceUrl=URL.createObjectURL(file);original('<div class="fi-pages"><img alt="Original uploaded report"></div><div class="fi-tools"><button data-ocr>Read image with OCR</button></div>');q('.fi-pages img').src=sourceUrl;draft([]);}
       } catch(e){if(d.isConnected){draft([]);status(ext==='csv'?e.message:'Unable to read this PDF. Open the original on your device and enter the readings below.');}}
@@ -207,7 +218,7 @@
         ocrWorker=worker;const {data}=await worker.recognize(q('.fi-pages canvas')||q('.fi-pages img'));
         if(!d.isConnected)return;
         const kept=rows.filter(r=>r.marker||r.value||r.unit), adds=parseText(data.text).filter(r=>!kept.some(k=>k.marker===r.marker&&k.value===r.value&&k.unit===r.unit));
-        if(adds.length){rows=kept.concat(adds).slice(0,200);render();}
+        if(adds.length){rows=kept.concat(adds);render();}
         status(adds.length?adds.length+' suggested results added. Compare each with the original.':'No new supported readings were recognised. Enter results directly from the report.');
       } catch{if(d.isConnected)status('Unable to recognise this page. Enter readings directly from the report.');}
       finally{if(ocrWorker){ocrWorker.terminate().catch(()=>{});ocrWorker=null;}busy=false;}
@@ -216,7 +227,7 @@
       const b=e.target.closest('button');if(!b)return;
       if(b.hasAttribute('data-close')){if(!saving)d.close();return;}
       if(b.hasAttribute('data-manual')){showReview();draft([]);q('.fi-name').focus();return;}
-      if(b.hasAttribute('data-add')){if(busy){error('Wait for extraction to finish.');return;}if(rows.length>=200){error('Each import can hold up to 200 readings.');return;}rows.push(blank());render();q('.fi-rows').lastElementChild.querySelector('select').focus();return;}
+      if(b.hasAttribute('data-add')){if(busy){error('Wait for extraction to finish.');return;}rows.push(blank());render();q('.fi-rows').lastElementChild.querySelector('input').focus();return;}
       if(b.hasAttribute('data-remove')){rows.splice(+b.dataset.remove,1);render();return;}
       if(b.hasAttribute('data-ocr')){await ocr();return;}
       if(b.matches('[data-prev],[data-next]')){try{await renderPage(Math.min(pdf.numPages,Math.max(1,pageNo+(b.hasAttribute('data-prev')?-1:1))));}catch{error('Unable to show this page.');}return;}

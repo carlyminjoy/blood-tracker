@@ -34,7 +34,7 @@ function records(){return [...book().blood,...book().wear.flatMap(row=>Object.en
 function saveNew(change){const next=structuredClone(state);change(next.real);next.mode='personal';persist(next);render()}
 window.formaSaveBlood=(rows,reportName)=>{
  if(!Array.isArray(rows)||!rows.length)throw Error('No reviewed results to save.');
- saveNew(real=>{for(const r of rows){const row={...r,report:reportName};let prev=real.blood.findIndex(x=>x.marker===r.marker&&x.date===r.date);if(prev>=0)real.blood[prev]=row;else real.blood.push(row)}
+ saveNew(real=>{for(const r of rows){const row={...r,report:reportName};let prev=real.blood.findIndex(x=>x.marker===r.marker&&x.date===r.date&&x.unit===r.unit);if(prev>=0)real.blood[prev]=row;else real.blood.push(row)}
  real.reports.unshift({name:reportName,date:day(),count:rows.length})});toast(`${rows.length} blood results saved to your workspace`);
 };
 window.formaPersonalActive=()=>!inExample();
@@ -96,17 +96,27 @@ function workspace(){sheet(dt('Your workspace','lock')+`<p class="sub">The examp
 let selectedBlood='';
 function bloodChart(rows,unit){
  const points=rows.filter(r=>(!r.qualifier||r.qualifier==='=')&&(!r.comparator||r.comparator==='=')&&Number.isFinite(+r.value)).sort((a,b)=>a.date.localeCompare(b.date));
- if(!points.length)return `<p class="note">These results contain comparison signs. See the exact reported readings below.</p>`;
+ if(!points.length)return `<p class="note">The table below preserves the reported readings. Only exact numerical values can be plotted.</p>`;
  const vals=points.map(r=>+r.value),lo=Math.min(...vals),hi=Math.max(...vals),pad=(hi-lo)*.15||Math.max(1,Math.abs(hi)*.05),min=lo-pad,max=hi+pad,dates=points.map(r=>Date.parse(r.date)),first=dates[0],last=dates.at(-1);
  const coords=points.map((r,i)=>[first===last?320:72+500*(dates[i]-first)/(last-first),120-100*(r.value-min)/(max-min)]);
  return `<figure class="blood-chart"><figcaption>${esc(unit)} · ${points.length} exact reading${points.length===1?'':'s'}</figcaption><svg viewBox="0 0 640 152" role="img" aria-label="Measurements over time in ${esc(unit)}. Values are listed below.">${[0,1,2].map(i=>`<line x1="62" x2="589" y1="${20+50*i}" y2="${20+50*i}" stroke="#dce6df"/><text x="55" y="${24+50*i}" text-anchor="end">${Number((max-(max-min)*i/2).toPrecision(3))}</text>`).join('')}<polyline points="${coords.map(p=>p.join(',')).join(' ')}" fill="none" stroke="#337a58" stroke-width="3"/>${coords.map(([x,y],i)=>`<circle cx="${x}" cy="${y}" r="4" fill="#337a58"><title>${fmt(points[i].date)} · ${measured(points[i])}</title></circle>`).join('')}<text x="${first===last?320:72}" y="145" text-anchor="${first===last?'middle':'start'}">${fmt(points[0].date)}</text>${first!==last?`<text x="574" y="145" text-anchor="end">${fmt(points.at(-1).date)}</text>`:''}</svg></figure>`;
 }
+function bloodAssessment(r){
+ if(C.matchMarker(r.marker))return C.assess(r);
+ const {low,high,qualifier,value,unit}=r;
+ const range=low!=null&&high!=null?((r.lowExclusive?'> ':'')+low+' – '+(r.highExclusive?'< ':'')+high):low!=null?(r.lowExclusive?'> ':'≥ ')+low:high!=null?(r.highExclusive?'< ':'≤ ')+high:'';
+ const numeric=typeof value==='number'&&!qualifier&&range;
+ const status=numeric?(low!=null&&(value<low||r.lowExclusive&&value===low)?'low':high!=null&&(value>high||r.highExclusive&&value===high)?'high':'in'):'context';
+ return {status,label:({in:'In range',low:'Below range',high:'Above range',context:'Recorded'})[status],range:r.referenceText||(range?range+' '+unit:'No reference supplied'),source:'Reporting laboratory'};
+}
 function bloodPage(){
- const rs=book().blood,latest=C.latestByMarker(rs),markers=C.markers.filter(m=>m.kind==='blood'&&latest.has(m.id)).sort((a,b)=>a.name.localeCompare(b.name));
+ const rs=book().blood,latest=new Map();
+ for(const r of rs)if(!latest.has(r.marker)||r.date>=latest.get(r.marker).date)latest.set(r.marker,r);
+ const markers=[...latest.values()].map(r=>C.matchMarker(r.marker)||{id:r.marker,name:r.markerName||r.marker.replace(/^lab:/,''),description:'Recorded from your pathology report.'}).sort((a,b)=>a.name.localeCompare(b.name));
  const header=heading('Blood','Explore every recorded blood marker and follow its changes over time.',upload());
  if(!markers.length)return header+'<section class="blank"><h2>Your blood history starts here</h2><p>Upload a pathology report to see your markers and their trends.</p></section>';
- const m=markers.find(m=>m.id===selectedBlood)||markers[0],rows=rs.filter(r=>r.marker===m.id).sort((a,b)=>b.date.localeCompare(a.date)),r=rows[0],a=C.assess(r);
- return header+`<div class="blood-layout"><section class="panel blood-list"><div class="section-head"><h2>Recorded markers</h2>${tag(markers.length)}</div>${markers.map(x=>`<button class="blood-choice ${x===m?'selected':''}" aria-pressed="${x===m}" data-do="selectBlood" data-id="${x.id}"><span>${esc(x.name)}</span><small>${measured(latest.get(x.id))}</small></button>`).join('')}</section><section class="panel blood-detail"><h2>${esc(m.name)}</h2><p class="sub">${esc(m.description)}</p><span class="score">${measured(r)}</span> ${status(a)}<p class="date-note">Collected ${fmt(r.date)}</p><div class="note"><strong>Reference</strong> &nbsp;${esc(a.range)}<br>${esc(a.source)}</div><h3>Progress over time</h3>${[...new Set(rows.map(x=>x.unit))].map(u=>bloodChart(rows.filter(x=>x.unit===u),u)).join('')}<div class="table-scroll"><table><thead><tr><th>Collected</th><th>Result</th><th>Reference at test</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${fmt(x.date)}</td><td>${measured(x)}</td><td>${esc(C.assess(x).range)}</td></tr>`).join('')}</tbody></table></div>${cites([a.sourceKey])}</section></div>`}
+ const m=markers.find(m=>m.id===selectedBlood)||markers[0],rows=rs.filter(r=>r.marker===m.id).sort((a,b)=>b.date.localeCompare(a.date)),r=rows[0],a=bloodAssessment(r);
+ return header+`<div class="blood-layout"><section class="panel blood-list"><div class="section-head"><h2>Recorded markers</h2>${tag(markers.length)}</div>${markers.map(x=>`<button class="blood-choice ${x===m?'selected':''}" aria-pressed="${x===m}" data-do="selectBlood" data-id="${esc(x.id)}"><span>${esc(x.name)}</span><small>${measured(latest.get(x.id))}</small></button>`).join('')}</section><section class="panel blood-detail"><h2>${esc(m.name)}</h2><p class="sub">${esc(m.description)}</p><span class="score">${measured(r)}</span> ${status(a)}<p class="date-note">Collected ${fmt(r.date)}</p><div class="note"><strong>Reference</strong> &nbsp;${esc(a.range)}<br>${esc(a.source)}</div><h3>Progress over time</h3>${[...new Set(rows.map(x=>x.unit))].map(u=>bloodChart(rows.filter(x=>x.unit===u),u)).join('')}<div class="table-scroll"><table><thead><tr><th>Collected</th><th>Result</th><th>Reference at test</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${fmt(x.date)}</td><td>${measured(x)}</td><td>${esc(bloodAssessment(x).range)}</td></tr>`).join('')}</tbody></table></div>${cites([a.sourceKey])}</section></div>`}
 
 
 function render(){route=location.hash.slice(1);if(!Object.hasOwn(tabs,route))route='overview';document.title=`${tabs[route][0]} · Forma`;document.getElementById('nav').innerHTML=Object.entries(tabs).map(([id,[label,ico]])=>`<a href="#${id}" class="${route===id?'active':''}" ${route===id?'aria-current="page"':''}>${icon(ico,16)}${label}</a>`).join('');main.innerHTML=({overview,blood:bloodPage,plan:planPage,sources:sourcePage,age:agePage}[route])()+`<div class="overview-foot"><span>${icon('lock',13)}${inExample()?'Example workspace · Fictional health data':'Personal workspace · Saved on this device'}</span><button data-do="guide">Scoring methodology</button></div>`}
