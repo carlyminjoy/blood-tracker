@@ -159,7 +159,16 @@ function recommendations(records){
   return [{...action,relevance,reason}];
  }).sort((a,b)=>b.relevance-a.relevance||b.evidence-a.evidence);
 }
-const api={markers,categories,actions,sources,methodology,assess,categoryResult,recommendations,matchMarker,acceptsUnit,latestByMarker};
+// Strong administrative and narrative signatures also identify legacy OCR rows.
+function reportProse(name,unit=''){
+ const s=String(name||'').normalize('NFKC');
+ return /\b(?:reported|collected|printed|requested|birth|DOB|provider|address|accession|medicare|telephone|patient name|lab no|specimen no)\b/i.test(s)
+   || /\b(?:female|male)\b.*\b(?:years?|yrs?)\b/i.test(s)
+   || /\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/.test(s)
+   || /\b(?:risk exceeds|absolute risk of|risk of .+ events|clinical interpretation|repeat testing|recommend(?:ed|ation)?|consult your|consistent with|may indicate)\b/i.test(s)
+   || (/\b(?:risk|event|follow.up)\b/i.test(s)&&/^(?:years?|months?|weeks?)\.?$/i.test(unit));
+}
+const api={reportProse,markers,categories,actions,sources,methodology,assess,categoryResult,recommendations,matchMarker,acceptsUnit,latestByMarker};
 if(typeof window!=='undefined') window.VitalClinical=api;
 if(typeof module!=='undefined') module.exports=api;
 })();

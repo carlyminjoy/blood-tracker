@@ -41,6 +41,16 @@ function bloodTests(rows){
  }
  return [...tests.values()].map(t=>({date:t.date,count:t.count,name:[...t.names].join(' · ')}));
 }
+// Keep original records locally so misclassified historical OCR is recoverable.
+function cleanImportedProse(workspace){
+ const suspect=workspace.blood.filter(r=>r.marker.startsWith('lab:')&&C.reportProse(r.markerName||r.marker.slice(4),r.unit));
+ if(!suspect.length)return false;
+ const rejected=new Set(suspect);
+ workspace.excludedReportText=[...(workspace.excludedReportText||[]),...suspect];
+ workspace.blood=workspace.blood.filter(r=>!rejected.has(r));workspace.reports=bloodTests(workspace.blood);
+ return true;
+}
+if(cleanImportedProse(state.real)){try{persist()}catch{}}
 const readingKey=r=>JSON.stringify([r.date,r.marker,r.unit,r.value,r.qualifier||'',r.low??null,r.high??null,!!r.lowExclusive,!!r.highExclusive,r.referenceText||'']);
 window.formaSaveBlood=(rows,reportName)=>{
  if(!rows?.length)throw Error('No results to save.');

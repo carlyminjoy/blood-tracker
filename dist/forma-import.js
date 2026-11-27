@@ -107,7 +107,16 @@
         if(/^(?:date|time|lab no|collected|reported|page|age|phone|fax|in SI units|target|printed|requested|dob)\b/i.test(line))continue;
         const g=line.match(/^([\p{L}][\p{L}\p{N} ()/.*%_-]{0,85}?)\s+([<>≤≥]?\s*[+-]?(?:\d+(?:\.\d+)?|\.\d+)|negative|positive|reactive|non-reactive|detected|not detected)\s*([^\s(]*)\s*(?:fasting\s*)?(?:\(([^)]+)\))?\s*[=|]*$/iu);
         if(!g||(!g[3]&&!g[4]&&!/[a-z]/i.test(g[2])))continue;
-        if(g[3]&&!/[a-zµμ%£]/i.test(g[3]))continue;
+        if(C().reportProse(g[1],g[3]))continue;
+        // Free-form PDF names require a measurement unit, a numerical interval,
+        // or an explicitly qualitative result. CSV and manual names stay open.
+        const u=g[3].normalize('NFKC');
+        const measurement=/^(?:[%‰]|(?:[a-zµμ0-9^°×*.+-]+\/)+(?:[a-zµμ0-9^°×*.+-]+)|fL|p[gl]|s|sec|min|ratio|index|INR|units?|mmHg|mOsm|[uµμnm]?mol)$/i.test(u);
+        const interval=parseRange(g[4]||'');
+        const credibleInterval=interval&&(interval.low!==undefined||interval.high!==undefined);
+        if(g[3]&&!measurement)continue;
+        if(!g[3]&&!credibleInterval&&!/^(?:negative|positive|reactive|non-reactive|detected|not detected)$/i.test(g[2]))continue;
+        if(/\b(?:is|was|should|would|has|exceeds|over the|test results|performed by)\b/i.test(g[1]))continue;
         const name=g[1].trim().replace(/\*+$/,'').trim();
         const row={...blank(),marker:lookup(name)?.id||name,value:g[2].trim(),unit:g[3],referenceText:g[4]||'',...(parseRange(g[4])||{})};
         const fingerprint=JSON.stringify(row);if(!seen.has(fingerprint)){seen.add(fingerprint);rows.push(row);}continue;
