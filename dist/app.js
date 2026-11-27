@@ -27,7 +27,7 @@ demo.wearImports=[{date:dates.at(-1),name:'Example wearable export',count:8}];
 let route='overview',filter='recommended',query='',markerGroup='all';
 const dialog=document.getElementById('detail'),main=document.getElementById('main');
 const inExample=()=>state.mode==='example';
-const book=()=>inExample()?demo:state.real;
+const book=()=>inExample()?{...demo,blood:state.exampleBlood??demo.blood}:state.real;
 const plan=()=>inExample()?state.examplePlan:state.real.plan;
 const persist=(next=state)=>{localStorage.setItem(key,JSON.stringify(next));state=next};
 function records(){return [...book().blood,...book().wear.flatMap(row=>Object.entries({sleep:'sleepHours',hrv:'hrv',steps:'steps',restingHR:'restingHR'}).filter(([,field])=>row[field]!=null).map(([marker,field])=>({marker,value:row[field],unit:C.matchMarker(marker).unit,date:row.date,report:row.source||'Example wearable export'})))]}
@@ -118,26 +118,103 @@ function actButton(a){let p=plan()[a.id];return p?`<button class="soft" data-do=
 function showAction(id){const a=getAction(id),p=plan()[id];if(!a)return;const stale=p&&!C.recommendations(records()).some(x=>x.id===id);sheet(dt(a.title,a.category)+(stale?'<p class="note">Saved from earlier results. The ratings below reflect the measurements when this action was added.</p>':'')+`<p class="sub">${esc(a.description)}</p>${ratings(a)}<h3>Why it’s relevant</h3><p class="sub">${esc(a.reason)}</p><h3>What the research supports</h3><p class="sub">${esc(a.evidenceNote)}</p>${cites(a.sources)}${p?`<h3>Tracking history</h3><p class="date-note">Added ${fmt(p.added)}</p>${p.dates.length?p.dates.slice().reverse().map(d=>`<span class="history-day">${fmt(d)}</span>`).join(''):'<p class="sub">Your first check-in will appear here.</p>'}`:''}<div class="detail-actions">${actButton(a)}${p?`<button class="soft" data-do="remove" data-id="${id}">Remove from plan</button>`:''}<button class="linkbtn" data-do="guide">Rating guide</button></div>`)}
 function actionCard(a){const p=plan()[a.id];return `<article class="action"><div class="label">${icon(a.category,16)}${esc(categoryBy(a.category).name)}</div><h3>${esc(a.title)}</h3><p class="sub">${esc(a.description)}</p>${ratings(a)}${p?`<p class="date-note">${p.dates.length} check-in${p.dates.length===1?'':'s'} · ${p.dates.length?'Last logged '+fmt(p.dates.at(-1)):'Added '+fmt(p.added)}</p>`:''}<div class="action-foot"><button class="linkbtn" data-do="action" data-id="${a.id}">${icon('book',15)}Evidence & details</button>${actButton(a)}</div></article>`}
 function planPage(){const recs=C.recommendations(records()),tracked=Object.keys(plan()).map(getAction).filter(Boolean),arr=filter==='tracked'?tracked:recs;return heading('Action plan','Choose actions linked to your results and log your progress over time.')+`<div class="tabs"><button class="${filter==='recommended'?'active':''}" data-do="recommended">Recommended (${recs.length})</button><button class="${filter==='tracked'?'active':''}" data-do="tracked">My plan (${tracked.length})</button></div><div class="section-head"><h2>${filter==='tracked'?'Your tracked actions':'Recommended for you'}</h2><button class="linkbtn" data-do="guide">${icon('info',15)}Rating guide</button></div>${arr.length?`<div class="action-grid">${arr.map(actionCard).join('')}</div>`:`<div class="blank"><h3>${filter==='tracked'?'Your plan starts here':'No matching actions yet'}</h3><p>${filter==='tracked'?'Select an action to start logging it.':'Add a supported marker to see recommendations.'}</p><button class="soft" data-do="${filter==='tracked'?'recommended':'blood'}">${filter==='tracked'?'Browse recommended actions':'Upload blood results'}</button></div>`}`}
-function sourcePage(){const imports=[...bloodTests(book().blood).map(r=>({...r,type:'Blood test'})),...book().wearImports.map(r=>({...r,type:'Wearable data'}))].sort((a,b)=>b.date.localeCompare(a.date));return heading('Data sources','Manage your pathology reports and wearable data.')+`<div class="two-cols"><section class="panel source-card">${tile('tube')}<h2>Blood tests</h2><p class="sub">Upload a pathology PDF, image or CSV. Review the extracted markers, units and report intervals before saving.</p>${upload()}</section><section class="panel source-card">${tile('watch')}<h2>Garmin data</h2><p class="sub">Track sleep, overnight HRV, steps and resting heart rate through a personal Garmin sync file or a wearable export.</p><div class="rowtools"><button class="btn" data-do="sync">${icon('watch',16)}Set up Garmin sync</button><button class="soft" data-do="wear">${icon('up',16)}Import Garmin data</button></div></section></div><section class="section panel"><div class="section-head"><h2>Import history</h2>${tag(imports.length+' imports')}</div>${imports.length?`<div class="table-scroll"><table><thead><tr><th>File or source</th><th>Type</th><th>Collection / import date</th><th>Imported</th></tr></thead><tbody>${imports.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.type}</td><td>${fmt(r.date)}</td><td>${r.count} ${r.type==='Blood test'?'results':'days'}</td></tr>`).join('')}</tbody></table></div>`:'<p class="sub">Your reviewed imports will appear here.</p>'}</section><p class="note">${icon('lock',15)} Results and check-ins are stored in this browser on this device. Clearing site data removes them. Original blood reports are used during review only.</p>`}
+function sourcePage(){const imports=[...bloodTests(book().blood).map(r=>({...r,type:'Blood test'})),...book().wearImports.map(r=>({...r,type:'Wearable data'}))].sort((a,b)=>b.date.localeCompare(a.date));return heading('Data sources','Manage your pathology reports and wearable data.')+`<div class="two-cols"><section class="panel source-card">${tile('tube')}<h2>Blood tests</h2><p class="sub">Upload a pathology PDF, image or CSV. Review the extracted markers, units and report intervals before saving.</p>${upload()}</section><section class="panel source-card">${tile('watch')}<h2>Garmin data</h2><p class="sub">Track sleep, overnight HRV, steps and resting heart rate through a personal Garmin sync file or a wearable export.</p><div class="rowtools"><button class="btn" data-do="sync">${icon('watch',16)}Set up Garmin sync</button><button class="soft" data-do="wear">${icon('up',16)}Import Garmin data</button></div></section></div><section class="section panel"><div class="section-head"><h2>Import history</h2>${tag(imports.length+' imports')}</div>${imports.length?`<div class="table-scroll"><table><thead><tr><th>File or source</th><th>Type</th><th>Collection / import date</th><th>Imported</th><th aria-label="Manage test"></th></tr></thead><tbody>${imports.map(r=>`<tr><td>${esc(r.name)}</td><td>${r.type}</td><td>${fmt(r.date)}</td><td>${r.count} ${r.type==='Blood test'?'results':'days'}</td><td>${r.type==='Blood test'?deleteButton('test',r.date,'Delete test'):''}</td></tr>`).join('')}</tbody></table></div>`:'<p class="sub">Your reviewed imports will appear here.</p>'}</section><p class="note">${icon('lock',15)} Results and check-ins are stored in this browser on this device. Clearing site data removes them. Original blood reports are used during review only.</p>`}
 function agePage(){return heading('Inner age','A future view of biomarker-based age estimates.')+`<section class="agebox"><span class="tag">${icon('clock',14)}Planned feature</span><h2>Biological age</h2><p>This space is reserved for an age estimate from a published biomarker model. A future release will show the model, required inputs and uncertainty alongside chronological age.</p></section>`}
 function workspace(){sheet(dt('Your workspace','lock')+`<p class="sub">The example workspace uses fictional results. Your personal imports and check-ins stay in this browser.</p><div class="list-row"><div><b>Personal workspace</b><small>${state.real.blood.length} blood results · ${state.real.wear.length} wearable days</small></div><button class="soft" data-do="personal">${inExample()?'Open workspace':'Current view'}</button></div><div class="list-row"><div><b>Example workspace</b><small>Explore sample scores, trends and actions.</small></div><button class="soft" data-do="example">${inExample()?'Current view':'View example'}</button></div><p class="note">Your first import opens your personal workspace automatically.</p>`)}
 
 let selectedBlood='';
+const chartStyles={
+ in:['In range','#347953'],low:['Below range','#ad6226'],high:['Above range','#b43b44'],
+ context:['Unassessed','#708078'],unknown:['Unassessed','#708078']
+};
 function bloodChart(rows,unit){
- const points=rows.filter(r=>(!r.qualifier||r.qualifier==='=')&&(!r.comparator||r.comparator==='=')&&Number.isFinite(+r.value)).sort((a,b)=>a.date.localeCompare(b.date));
- if(!points.length)return `<p class="note">The table below preserves the reported readings. Only exact numerical values can be plotted.</p>`;
- const assessments=points.map(bloodAssessment);const vals=points.flatMap((r,i)=>[+r.value,assessments[i].low,assessments[i].high].filter(Number.isFinite)),lo=Math.min(...vals),hi=Math.max(...vals),pad=(hi-lo)*.15||Math.max(1,Math.abs(hi)*.05),min=lo-pad,max=hi+pad,dates=points.map(r=>Date.parse(r.date)),first=dates[0],last=dates.at(-1);
- const coords=points.map((r,i)=>[first===last?320:72+500*(dates[i]-first)/(last-first),120-100*(r.value-min)/(max-min)]);
- const palette={in:'#29834e',low:'#bb6228',high:'#b43b44',context:'#64748b',unknown:'#64748b'};
- const y=v=>Math.max(20,Math.min(120,120-100*(v-min)/(max-min)));
- const bands=assessments.map((a,i)=>{
-   const start=i?(coords[i-1][0]+coords[i][0])/2:62,end=i+1<coords.length?(coords[i][0]+coords[i+1][0])/2:589;
-   if(a.low==null&&a.high==null)return '';
-   const upper=a.high==null?20:y(a.high),lower=a.low==null?120:y(a.low);
-   return [[20,upper,'#f7dfe0'],[upper,lower,'#dcefdc'],[lower,120,'#fae8d6']].map(([top,bottom,fill])=>`<rect x="${start}" y="${top}" width="${end-start}" height="${bottom-top}" fill="${fill}"/>`).join('');
- }).join('');
- return `<figure class="blood-chart"><figcaption>${esc(unit)} · ${points.length} exact reading${points.length===1?'':'s'}</figcaption><svg viewBox="0 0 640 152" role="img" aria-label="Measurements over time in ${esc(unit)}. Values are listed below.">${bands}${[0,1,2].map(i=>`<line x1="62" x2="589" y1="${20+50*i}" y2="${20+50*i}" stroke="#dce6df"/><text x="55" y="${24+50*i}" text-anchor="end">${Number((max-(max-min)*i/2).toPrecision(3))}</text>`).join('')}<polyline points="${coords.map(p=>p.join(',')).join(' ')}" fill="none" stroke="#337a58" stroke-width="3"/>${coords.map(([x,y],i)=>`<circle cx="${x}" cy="${y}" r="5" stroke="white" stroke-width="1.5" fill="${palette[assessments[i].status]||palette.context}"><title>${esc(assessments[i].label)} · ${fmt(points[i].date)} · ${measured(points[i])}</title></circle>`).join('')}<text x="${first===last?320:72}" y="145" text-anchor="${first===last?'middle':'start'}">${fmt(points[0].date)}</text>${first!==last?`<text x="574" y="145" text-anchor="end">${fmt(points.at(-1).date)}</text>`:''}</svg><small class="range-key"><span>🟢 In range</span> · <span>🟠 Below</span> · <span>🔴 Above</span> · <span>⚪ Unassessed</span></small></figure>`;
+ const exact=r=>(!r.qualifier||r.qualifier==='=')&&(!r.comparator||r.comparator==='=')&&r.value!=null&&String(r.value).trim()!==''&&Number.isFinite(+r.value);
+ const points=rows.filter(exact).sort((a,b)=>a.date.localeCompare(b.date));
+ if(!points.length)return '<p class="note">Only exact numerical readings can be plotted. Reported results are listed below.</p>';
+ const assessments=points.map(bloodAssessment);
+ const values=points.flatMap((r,i)=>[+r.value,assessments[i].low,assessments[i].high].filter(Number.isFinite));
+ const lo=Math.min(...values),hi=Math.max(...values);
+ const rough=((hi-lo)||Math.max(Math.abs(lo)*.1,1))/3;
+ const magnitude=10**Math.floor(Math.log10(rough));
+ const step=([1,2,2.5,5,10].find(n=>n*magnitude>=rough)||10)*magnitude;
+ const bottom=Math.floor((lo-step*.12)/step)*step,top=Math.ceil((hi+step*.12)/step)*step;
+ const y=value=>100*(top-value)/(top-bottom);
+ const first=Date.parse(points[0].date),last=Date.parse(points.at(-1).date);
+ const pos=points.map(r=>({x:last===first?50:2+96*(Date.parse(r.date)-first)/(last-first),y:y(+r.value)}));
+ const labels=[],grid=[];
+ for(let i=0;i<=Math.round((top-bottom)/step);i++){
+   const value=Number((top-i*step).toPrecision(12)),pct=y(value);
+   labels.push(`<span style="top:${pct}%">${value}</span>`);
+   grid.push(`<i class="trend-grid" style="top:${pct}%"></i>`);
+ }
+ const hasRange=a=>Number.isFinite(a.low)||Number.isFinite(a.high);
+ const fixed=assessments.every(a=>a.low===assessments[0].low&&a.high===assessments[0].high);
+ const band=(a,i)=>{
+   if(!hasRange(a))return '';
+   const start=a.high==null?0:y(a.high),end=a.low==null?100:y(a.low);
+   const style=fixed?'left:0;width:100%':`left:${pos[i].x}%;width:8px;transform:translateX(-50%)`;
+   return `<i class="trend-band" style="${style};top:${start}%;height:${Math.max(0,end-start)}%"></i>`;
+ };
+ const dots=points.map((r,i)=>{
+   const a=assessments[i],[,color]=chartStyles[a.status]||chartStyles.context;
+   return `<span class="trend-dot" style="left:${pos[i].x}%;top:${pos[i].y}%;--dot:${color}" data-x="${pos[i].x}" data-y="${pos[i].y}" data-date="${fmt(r.date)}" data-value="${measured(r)}" data-detail="${esc(a.label)} · ${esc(a.range)}"></span>`;
+ });
+ const legend=[...new Set(assessments.map(a=>chartStyles[a.status]||chartStyles.context))].map(([name,color])=>`<span><i style="background:${color}"></i>${name}</span>`).join('');
+ return `<figure class="blood-chart"><figcaption>${esc(unit)} · ${points.length} exact reading${points.length===1?'':'s'}</figcaption><div class="trend-frame"><div class="trend-scale" aria-hidden="true">${labels.join('')}</div><div class="trend-plot" tabindex="0" role="group" aria-label="Result trend in ${esc(unit)}. Use left and right arrows to explore readings."><div aria-hidden="true">${fixed?band(assessments[0],0):assessments.map(band).join('')}${grid.join('')}<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="${pos.map(p=>p.x+','+p.y).join(' ')}" vector-effect="non-scaling-stroke" fill="none" stroke="#4c7969" stroke-width="2"/></svg><i class="trend-cursor" hidden></i>${dots.join('')}</div><output class="trend-tip" hidden><strong></strong><span></span><small></small></output></div><div class="trend-dates ${first===last?'single':''}"><span>${fmt(points[0].date)}</span>${first===last?'':`<span>${fmt(points.at(-1).date)}</span>`}</div></div><div class="trend-legend">${assessments.some(hasRange)?`<span><i class="band-key"></i>${fixed?'Reference range':'Reference at each test'}</span>`:''}${legend}</div></figure>`;
 }
+function highlightReading(plot,index){
+ const dots=plot.querySelectorAll('.trend-dot');
+ const dot=dots[index],tip=plot.querySelector('.trend-tip'),cursor=plot.querySelector('.trend-cursor');
+ plot.querySelector('.active')?.classList.remove('active');
+ dot.classList.add('active');
+ plot.dataset.active=index;
+ cursor.hidden=false;cursor.style.left=dot.style.left;
+ tip.hidden=false;
+ tip.querySelector('strong').textContent=dot.dataset.value;
+ tip.querySelector('span').textContent=dot.dataset.date;
+ tip.querySelector('small').textContent=dot.dataset.detail;
+ const x=plot.clientWidth*dot.dataset.x/100,y=plot.clientHeight*dot.dataset.y/100;
+ tip.style.left=Math.max(0,Math.min(x-tip.offsetWidth/2,plot.clientWidth-tip.offsetWidth))+'px';
+ tip.style.top=(y>tip.offsetHeight+10?y-tip.offsetHeight-9:y+10)+'px';
+}
+function hideReading(plot){
+ plot.querySelector('.trend-tip').hidden=true;
+ plot.querySelector('.trend-cursor').hidden=true;
+ plot.querySelector('.active')?.classList.remove('active');
+ delete plot.dataset.active;
+}
+function exploreChart(event){
+ const plot=event.target.closest('.trend-plot');
+ if(!plot)return;
+ const rect=plot.getBoundingClientRect(),dots=[...plot.querySelectorAll('.trend-dot')];
+ const x=100*(event.clientX-rect.left)/rect.width,y=100*(event.clientY-rect.top)/rect.height;
+ let nearest=0;
+ for(let i=1;i<dots.length;i++){
+   const d=dots[i].dataset,b=dots[nearest].dataset;
+   if(Math.abs(d.x-x)<Math.abs(b.x-x)||(d.x===b.x&&Math.abs(d.y-y)<Math.abs(b.y-y)))nearest=i;
+ }
+ highlightReading(plot,nearest);
+}
+document.addEventListener('pointermove',exploreChart);
+document.addEventListener('pointerdown',e=>{
+ const old=document.querySelector('.trend-plot[data-active]');
+ if(old&&!old.contains(e.target))hideReading(old);
+ exploreChart(e);
+});
+document.addEventListener('pointerout',e=>{
+ const p=e.target.closest('.trend-plot');
+ if(p&&e.pointerType!=='touch'&&!p.contains(e.relatedTarget))hideReading(p);
+});
+document.addEventListener('focusin',e=>{if(e.target.matches('.trend-plot')&&e.target.dataset.active==null)highlightReading(e.target,0)});
+document.addEventListener('focusout',e=>{if(e.target.matches('.trend-plot'))hideReading(e.target)});
+document.addEventListener('keydown',e=>{
+ const p=e.target;
+ if(!p.matches('.trend-plot'))return;
+ const last=p.querySelectorAll('.trend-dot').length-1,idx=Number(p.dataset.active||0);
+ if(e.key==='Escape'&&p.dataset.active!=null){e.preventDefault();hideReading(p);return}
+ const next={ArrowLeft:Math.max(0,idx-1),ArrowRight:Math.min(last,idx+1),Home:0,End:last}[e.key];
+ if(next!=null){e.preventDefault();highlightReading(p,next)}
+});
 function bloodAssessment(r){
  if(C.matchMarker(r.marker))return C.assess(r);
  const {low,high,qualifier,value,unit}=r;
@@ -146,6 +223,37 @@ function bloodAssessment(r){
  const status=numeric?(low!=null&&(value<low||r.lowExclusive&&value===low)?'low':high!=null&&(value>high||r.highExclusive&&value===high)?'high':'in'):'context';
  return {low,high,status,label:({in:'In range',low:'Below range',high:'Above range',context:'Recorded'})[status],range:r.referenceText||(range?range+' '+unit:'No reference supplied'),source:'Reporting laboratory'};
 }
+function deleteButton(scope,id,label){
+ return `<button class="delete-link" data-do="deleteBlood" data-scope="${scope}" data-id="${esc(id)}">${label}</button>`;
+}
+function bloodDeletionMatch(scope,id){
+ return {test:r=>r.date===id,marker:r=>r.marker===id,reading:r=>readingKey(r)===id}[scope];
+}
+function requestBloodDeletion(scope,id){
+ const matches=bloodDeletionMatch(scope,id);
+ if(!matches)return;
+ const rows=book().blood.filter(matches);
+ if(!rows.length)return;
+ const r=rows[0],name=C.matchMarker(r.marker)?.name||r.markerName||r.marker.replace(/^lab:/,'');
+ const description={
+   test:`This removes all ${rows.length} reading${rows.length===1?'':'s'} collected on ${fmt(r.date)}, including readings from files merged into this test.`,
+   marker:`This removes every recorded reading for ${esc(name)} (${rows.length} in total).`,
+   reading:`This removes the ${esc(name)} reading of ${measured(r)} collected on ${fmt(r.date)}.`
+ }[scope];
+ sheet(dt(`Delete this ${scope}?`,'tube')+`<p class="sub">${description}</p><div class="detail-actions"><button class="soft" autofocus data-do="close">Cancel</button><button class="btn destructive" data-do="confirmBloodDelete" data-scope="${scope}" data-id="${esc(id)}">Delete ${scope}</button></div>`);
+}
+function deleteBlood(scope,id){
+ const matches=bloodDeletionMatch(scope,id);
+ if(!matches)return;
+ const next=structuredClone(state);
+ if(inExample())next.exampleBlood=book().blood.filter(r=>!matches(r));
+ else{
+   next.real.blood=next.real.blood.filter(r=>!matches(r));
+   next.real.reports=bloodTests(next.real.blood);
+ }
+ persist(next);dialog.close();render();
+ toast(({test:'Blood test deleted',marker:'Marker history deleted',reading:'Reading deleted'})[scope]);
+}
 function bloodPage(){
  const rs=book().blood,latest=new Map();
  for(const r of rs)if(!latest.has(r.marker)||r.date>=latest.get(r.marker).date)latest.set(r.marker,r);
@@ -153,13 +261,13 @@ function bloodPage(){
  const header=heading('Blood','Explore every recorded blood marker and follow its changes over time.',upload());
  if(!markers.length)return header+'<section class="blank"><h2>Your blood history starts here</h2><p>Upload a pathology report to see your markers and their trends.</p></section>';
  const m=markers.find(m=>m.id===selectedBlood)||markers[0],rows=rs.filter(r=>r.marker===m.id).sort((a,b)=>b.date.localeCompare(a.date)),r=rows[0],a=bloodAssessment(r);
- return header+`<div class="blood-layout"><section class="panel blood-list"><div class="section-head"><h2>Recorded markers</h2>${tag(markers.length)}</div>${markers.map(x=>`<button class="blood-choice ${x===m?'selected':''}" aria-pressed="${x===m}" data-do="selectBlood" data-id="${esc(x.id)}"><span>${esc(x.name)}</span><small>${measured(latest.get(x.id))}</small></button>`).join('')}</section><section class="panel blood-detail"><h2>${esc(m.name)}</h2><p class="sub">${esc(m.description)}</p><span class="score">${measured(r)}</span> ${status(a)}<p class="date-note">Collected ${fmt(r.date)}</p><div class="note"><strong>Reference</strong> &nbsp;${esc(a.range)}<br>${esc(a.source)}</div><h3>Progress over time</h3>${[...new Set(rows.map(x=>x.unit))].map(u=>bloodChart(rows.filter(x=>x.unit===u),u)).join('')}<div class="table-scroll"><table><thead><tr><th>Collected</th><th>Result</th><th>Reference at test</th><th>Source report</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${fmt(x.date)}</td><td>${measured(x)}</td><td>${esc(bloodAssessment(x).range)}</td><td>${esc(rowSources(x).join(' · '))}</td></tr>`).join('')}</tbody></table></div>${cites([a.sourceKey])}</section></div>`}
+ return header+`<div class="blood-layout"><section class="panel blood-list"><div class="section-head"><h2>Recorded markers</h2>${tag(markers.length)}</div>${markers.map(x=>`<button class="blood-choice ${x===m?'selected':''}" aria-pressed="${x===m}" data-do="selectBlood" data-id="${esc(x.id)}"><span>${esc(x.name)}</span><small>${measured(latest.get(x.id))}</small></button>`).join('')}</section><section class="panel blood-detail"><div class="blood-title"><h2>${esc(m.name)}</h2>${deleteButton('marker',m.id,'Delete marker')}</div><p class="sub">${esc(m.description)}</p><span class="score">${measured(r)}</span> ${status(a)}<p class="date-note">Collected ${fmt(r.date)}</p><div class="note"><strong>Reference</strong> &nbsp;${esc(a.range)}<br>${esc(a.source)}</div><h3>Progress over time</h3>${[...new Set(rows.map(x=>x.unit))].map(u=>bloodChart(rows.filter(x=>x.unit===u),u)).join('')}<div class="table-scroll"><table><thead><tr><th>Collected</th><th>Result</th><th>Reference at test</th><th>Source report</th><th aria-label="Manage reading"></th></tr></thead><tbody>${rows.map(x=>`<tr><td>${fmt(x.date)}</td><td>${measured(x)}</td><td>${esc(bloodAssessment(x).range)}</td><td>${esc(rowSources(x).join(' · '))}</td><td>${deleteButton('reading',readingKey(x),'Delete reading')}</td></tr>`).join('')}</tbody></table></div>${cites([a.sourceKey])}</section></div>`}
 
 
 function render(){route=location.hash.slice(1);if(!Object.hasOwn(tabs,route))route='overview';document.title=`${tabs[route][0]} · Forma`;document.getElementById('nav').innerHTML=Object.entries(tabs).map(([id,[label,ico]])=>`<a href="#${id}" class="${route===id?'active':''}" ${route===id?'aria-current="page"':''}>${icon(ico,16)}${label}</a>`).join('');main.innerHTML=({overview,blood:bloodPage,plan:planPage,sources:sourcePage,age:agePage}[route])()+`<div class="overview-foot"><span>${icon('lock',13)}${inExample()?'Example workspace · Fictional health data':'Personal workspace · Saved on this device'}</span><button data-do="guide">Scoring methodology</button></div>`}
 function mutatePlan(fn){const next=structuredClone(state);fn(next.mode==='example'?next.examplePlan:next.real.plan);persist(next);render()}
 document.body.addEventListener('click',e=>{const el=e.target.closest('[data-do],[data-go]');if(!el)return;if(el.dataset.go){location.hash=el.dataset.go;return}const act=el.dataset.do,id=el.dataset.id;
-try{switch(act){case'selectBlood':selectedBlood=id;render();break;case'close':dialog.close();break;case'guide':guide();break;case'workspace':workspace();break;case'personal':case'example':persist({...state,mode:act});dialog.close();render();break;
+try{switch(act){case'deleteBlood':requestBloodDeletion(el.dataset.scope,id);break;case'confirmBloodDelete':deleteBlood(el.dataset.scope,id);break;case'selectBlood':selectedBlood=id;render();break;case'close':dialog.close();break;case'guide':guide();break;case'workspace':workspace();break;case'personal':case'example':persist({...state,mode:act});dialog.close();render();break;
 case'cat':showCategory(id);break;case'markers':query='';markerGroup='all';showAll();break;case'marker':showMarker(id);break;case'action':showAction(id);break;
 case'sync':window.openGarminSync();break;case'blood':case'wear':if(dialog.open)dialog.close();(act==='blood'?window.openBloodImport:window.openWearImport)();break;
 case'tracked':case'recommended':filter=act;render();break;
